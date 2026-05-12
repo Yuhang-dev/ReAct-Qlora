@@ -1,0 +1,64 @@
+# ReAct Training Configuration for RTX 4070s (12GB)
+# ────────────────────────────────────────────────────
+
+model:
+  name: "unsloth/Qwen2.5-7B-Instruct-bnb-4bit"
+  max_seq_length: 1536
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "bfloat16"
+  bnb_4bit_use_double_quant: true
+  trust_remote_code: true
+
+lora:
+  r: 32
+  alpha: 64
+  dropout: 0.1
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
+
+training:
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16           # effective batch_size = 16
+  learning_rate: 8.0e-5
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.1
+  num_train_epochs: 2
+  optim: "adamw_8bit"
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+
+  gradient_checkpointing: true
+  gradient_checkpointing_kwargs:
+    use_reentrant: false
+  fp16: false
+  bf16: true
+
+  logging_steps: 10
+  save_steps: 200
+  eval_steps: 200
+  save_total_limit: 3
+  load_best_model_at_end: true
+  metric_for_best_model: "eval_loss"
+  greater_is_better: false
+
+  dataloader_num_workers: 2
+  remove_unused_columns: false
+  report_to: "none"
+
+data:
+  train_file: "data/processed/train.jsonl"
+  val_file: "data/processed/val.jsonl"
+  test_file: "data/processed/test.jsonl"
+  max_train_samples: null                  # null = use all
+  max_eval_samples: null
+
+output:
+  dir: "outputs"
+  run_name: "react-qwen2.5-7b-qlora"
+  seed: 42

@@ -1,0 +1,56 @@
+# Data Pipeline Configuration
+
+sources:
+  # ToolBench: Real-world API calling trajectories
+  toolbench:
+    enabled: true
+    repo: "ToolBench/ToolBench"
+    subsets: ["toolbench_rest", "toolbench_sql"]
+    max_samples: 4000
+    filter:
+      min_turns: 2            # At least 2 tool-calling rounds
+      max_turns: 8
+      require_final_answer: true
+
+  # HotpotQA: Multi-hop reasoning chains
+  hotpotqa:
+    enabled: true
+    repo: "hotpotqa/hotpot_qa"
+    subset: "distractor"
+    max_samples: 2000
+    filter:
+      require_multihop: true
+      min_evidence_count: 2
+
+  # GPT-4o synthetic data
+  synthetic:
+    enabled: true
+    max_samples: 4000
+    teacher_model: "gpt-4o"
+    batch_size: 50           # Generate 50 per batch
+    output_dir: "data/synthetic/"
+
+negative_sampling:
+  enabled: true
+  ratio: 0.1                 # 10% of final dataset are negative samples
+  error_types:
+    - timeout
+    - connection_error
+    - rate_limited
+    - invalid_parameter
+    - empty_result
+
+preprocessing:
+  max_tokens: 4096           # Filter out samples exceeding this length
+  min_tokens: 100            # Filter out samples below this length
+  format: "chatml"
+  validation:
+    check_thought_pairs: true
+    check_action_format: true
+    check_final_answer: true
+
+splits:
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+  seed: 42

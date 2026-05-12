@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Model weights & outputs (large files)
+outputs/
+outputs_alfworld/
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
+*.ckpt
+!requirements.txt
+
+# Data (generated/raw)
+data/raw/
+data/processed/
+data/synthetic/
+data/alfworld/
+data/alfworld_v2/
+data/alfworld_merged/
+data/alfworld_synthetic/
+data/baseline_test.json
+
+# SwanLab & WandB logs
+swanlog/
+wandb/
+*.swanlab
+
+# Environment
+.env
+*.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keep directory structure
+!data/
+!data/.gitkeep
+!outputs/.gitkeep
+!outputs_alfworld/.gitkeep
+
+# Temp files from ALFWorld
+alfworld/
+tmp/
+unsloth_compiled_cache/

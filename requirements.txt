@@ -1,0 +1,40 @@
+# ReAct Fine-tuning on RTX 4070s (12GB)
+# ─────────────────────────────────────────
+#
+# Install steps (order matters):
+# 1. pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
+# 2. pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
+# 3. pip install -r requirements.txt
+#
+# Verified working combo: torch 2.11.0+cu130, unsloth 2026.5.2, transformers 5.5.0
+
+# Core ML (torch installed separately via pytorch.org)
+transformers==5.5.0
+datasets==4.3.0
+accelerate==1.13.0
+bitsandbytes==0.49.2
+peft==0.19.1
+trl==0.24.0
+torchao==0.13.0
+
+# Unsloth ecosystem (installed via git, listed for reference)
+# unsloth==2026.5.2
+# unsloth_zoo==2026.5.1
+
+# Inference & Deployment
+# vllm>=0.6.0  # Install separately: pip install vllm
+# autoawq>=0.2.0  # Install separately: pip install autoawq
+
+# Evaluation & Demo
+gradio>=5.0.0
+openai>=1.50.0
+wandb>=0.17.0
+
+# Utilities
+sentencepiece==0.2.1
+protobuf==7.34.1
+pyyaml==6.0.3
+tqdm==4.67.3
+numpy>=1.26.0
+scikit-learn==1.8.0
+pytest>=9.0.0
