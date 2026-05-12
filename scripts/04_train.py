@@ -1,32 +1,26 @@
-"""ReAct QLoRA fine-tuning with Unsloth on RTX 4070s (12GB)."""
+"""ReAct QLoRA fine-tuning with Unsloth. Supports single-GPU and DeepSpeed multi-GPU."""
 
-import argparse
-import json
-import os
-import random
+import argparse, json, os, random
 from datetime import datetime
 from pathlib import Path
 
-# Unsloth MUST be imported before transformers/trl/peft
-import unsloth  # noqa: F401
+import unsloth  # noqa: F401 - must be first
 from unsloth import FastLanguageModel, is_bfloat16_supported
 
-import swanlab
-import torch
-import yaml
+import swanlab, torch, yaml
 from datasets import Dataset
 from transformers import TrainerCallback, TrainingArguments
 from trl import SFTTrainer
 
 
-def load_config(config_path: str) -> dict:
-    with open(config_path, "r", encoding="utf-8") as f:
+def load_config(path: str) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def load_jsonl_dataset(file_path: str) -> Dataset:
+def load_jsonl_dataset(path: str) -> Dataset:
     data = []
-    with open(file_path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
@@ -36,11 +30,10 @@ def load_jsonl_dataset(file_path: str) -> Dataset:
     return Dataset.from_list(data)
 
 
-def messages_to_training_text(messages: list[dict]) -> str:
+def messages_to_text(messages: list[dict]) -> str:
     parts = []
     for m in messages:
-        role = m["role"]
-        content = m["content"]
+        role, content = m["role"], m["content"]
         if role == "system":
             parts.append(f"<|im_start|>system\n{content}<|im_end|>")
         elif role == "user":
@@ -53,30 +46,19 @@ def messages_to_training_text(messages: list[dict]) -> str:
 
 
 def format_chatml(examples: dict) -> dict:
-    texts = []
-    for messages in examples["messages"]:
-        text = messages_to_training_text(messages)
-        texts.append(text)
+    texts = [messages_to_text(m) for m in examples["messages"]]
     return {"text": texts}
 
 
-tokenizer = None
-
-
 class SwanLabCallback(TrainerCallback):
-    """Log training metrics to SwanLab."""
-
     def on_log(self, args, state, control, logs=None, **kwargs):
         if logs:
-            metrics = {}
-            for k, v in logs.items():
-                if isinstance(v, (int, float)):
-                    metrics[k] = v
+            metrics = {k: v for k, v in logs.items() if isinstance(v, (int, float))}
             if metrics:
                 swanlab.log(metrics, step=state.global_step)
 
-    def on_save(self, args, state, control, **kwargs):
-        pass
+
+tokenizer = None
 
 
 def main():
@@ -87,11 +69,11 @@ def main():
     parser.add_argument("--train_file", type=str, default=None)
     parser.add_argument("--val_file", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default=None)
+    parser.add_argument("--deepspeed", type=str, default=None, help="DeepSpeed config path (e.g. configs/deepspeed_zero2.json)")
     parser.add_argument("--experiment_name", type=str, default=None)
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-
     if args.train_file:
         cfg["data"]["train_file"] = args.train_file
     if args.val_file:
@@ -99,12 +81,10 @@ def main():
     if args.output_dir:
         cfg["output"]["dir"] = args.output_dir
 
-    # ── Seed ──────────────────────────────────────────────
     seed = cfg["output"]["seed"]
     random.seed(seed)
     torch.manual_seed(seed)
 
-    # ── Experiment name ────────────────────────────────────
     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
     exp_name = args.experiment_name or cfg["output"]["run_name"]
     full_run_name = f"{exp_name}_{timestamp}"
@@ -113,7 +93,6 @@ def main():
     run_dir = output_root / full_run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── SwanLab init ──────────────────────────────────────
     swanlab.init(
         project="react-finetune",
         experiment_name=exp_name,
@@ -125,14 +104,12 @@ def main():
             "batch_size": cfg["training"]["per_device_train_batch_size"] * cfg["training"]["gradient_accumulation_steps"],
             "epochs": cfg["training"]["num_train_epochs"],
             "max_seq_length": cfg["model"]["max_seq_length"],
-            "train_samples": "see below",
-            "val_samples": "see below",
+            "deepspeed": args.deepspeed is not None,
             "seed": seed,
         },
         logdir=str(output_root / "swanlogs"),
     )
 
-    # ── Load model with Unsloth ──────────────────────────
     print(f"Loading model: {cfg['model']['name']}")
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_name=cfg["model"]["name"],
@@ -141,7 +118,6 @@ def main():
         load_in_4bit=cfg["model"]["load_in_4bit"],
     )
 
-    # ── Add LoRA adapters ───────────────────────────────
     lora_cfg = cfg["lora"]
     model = FastLanguageModel.get_peft_model(
         model,
@@ -159,7 +135,6 @@ def main():
     total = sum(p.numel() for p in model.parameters())
     print(f"Trainable params: {trainable:,} / {total:,} ({100 * trainable / total:.2f}%)")
 
-    # ── Load datasets ────────────────────────────────────
     print(f"Loading training data: {cfg['data']['train_file']}")
     train_ds = load_jsonl_dataset(cfg["data"]["train_file"])
     train_ds = train_ds.map(format_chatml, batched=True)
@@ -170,17 +145,13 @@ def main():
         val_ds = load_jsonl_dataset(cfg["data"]["val_file"])
         val_ds = val_ds.map(format_chatml, batched=True)
 
-    # Save data info
-    with open(run_dir / "data_info.json", "w", encoding="utf-8") as f:
-        json.dump({
-            "train_file": cfg["data"]["train_file"],
-            "val_file": cfg["data"]["val_file"],
-            "train_samples": len(train_ds),
-            "val_samples": len(val_ds) if val_ds else 0,
-        }, f, ensure_ascii=False, indent=2)
-
-    # ── Training args ───────────────────────────────────
     train_cfg = cfg["training"]
+
+    deepspeed_config = args.deepspeed
+    if deepspeed_config:
+        print(f"DeepSpeed enabled: {deepspeed_config}")
+    else:
+        print("Single-GPU mode (no DeepSpeed)")
 
     training_args = TrainingArguments(
         output_dir=str(run_dir),
@@ -209,9 +180,9 @@ def main():
         seed=seed,
         eval_strategy="steps" if val_ds else "no",
         save_strategy="steps",
+        deepspeed=deepspeed_config,
     )
 
-    # ── Trainer ─────────────────────────────────────────
     trainer = SFTTrainer(
         model=model,
         tokenizer=tokenizer,
@@ -224,8 +195,7 @@ def main():
         callbacks=[SwanLabCallback()],
     )
 
-    # ── Train ───────────────────────────────────────────
-    print(f"\n{'='*60}")
+    print(f"\n{'='*50}")
     print(f"Training: {full_run_name}")
     print(f"  Model:      {cfg['model']['name']}")
     print(f"  Train:      {len(train_ds)} samples")
@@ -236,19 +206,20 @@ def main():
     print(f"  Batch:      {train_cfg['per_device_train_batch_size']} x {train_cfg['gradient_accumulation_steps']} = {train_cfg['per_device_train_batch_size'] * train_cfg['gradient_accumulation_steps']}")
     print(f"  LR:         {train_cfg['learning_rate']}")
     print(f"  Epochs:     {train_cfg['num_train_epochs']}")
+    if deepspeed_config:
+        print(f"  DeepSpeed:  {deepspeed_config}")
     print(f"  SwanLab:    {output_root / 'swanlogs'}")
     print(f"  Output:     {run_dir}")
-    print(f"{'='*60}\n")
+    print(f"{'='*50}\n")
 
+    torch.cuda.empty_cache()
     trainer.train()
 
-    # ── Save final ──────────────────────────────────────
     final_path = run_dir / "final_lora"
     model.save_pretrained(final_path)
     tokenizer.save_pretrained(final_path)
     print(f"\nModel saved to {final_path}")
 
-    # ── Save training config for reproducibility ─────────
     with open(run_dir / "train_config.yaml", "w", encoding="utf-8") as f:
         yaml.dump(cfg, f, allow_unicode=True)
 

@@ -5,13 +5,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-# ── Regex patterns ──────────────────────────────────────────────
 THOUGHT_PATTERN = re.compile(r"Thought:\s*(.+?)(?=\n(?:Action|Final Answer)|\Z)", re.DOTALL)
 ACTION_PATTERN = re.compile(r"Action:\s*(.+?)(?=\n(?:Observation|Thought)|\Z)", re.DOTALL)
 FINAL_ANSWER_PATTERN = re.compile(r"Final Answer:\s*(.+?)$", re.DOTALL)
 TOOL_CALL_PATTERN = re.compile(r"(\w+)\(([^)]*)\)")
 
-# ── Default system prompt ───────────────────────────────────────
 SYSTEM_PROMPT = """You are a helpful assistant with access to the following tools:
 
 {tool_definitions}
